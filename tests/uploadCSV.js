@@ -6,6 +6,7 @@ const request = require('request');
 const moment = require('moment');
 const uploadResults = require('./uploadResults');
 const logger = require('../server/lib/winston');
+const { v4: uuidv4 } = require('uuid');
 
 if (!process.argv[2]) {
   logger.error('Please specify path to a CSV file');
@@ -58,16 +59,23 @@ fs.createReadStream(path.resolve(__dirname, '', csvFile))
   .on('data', row => {
     promises.push(
       new Promise((resolve, reject) => {
-        let sex = row['sex'];
-        let given = row['given_name'];
-        let surname = row['surname'];
-        let phone = row['phone_number'];
-        let nationalID = row['uganda_nin'];
-        let ARTNumb = row['art_number'];
+        let sex = row['gender'];
+        let given = row['first_name'] + ' ' + row['second_name'];
+        let surname = row['last_name'];
+        let phone = row['cell_number'];
+        let nationalID = row['art_id'];
+        let UPID = row['up_id'];
         let birthDate = row['date_of_birth'];
+
+        let date_enrollement = row['date_enrollement'];
+        let date_Initiation_ARV = row['date_Initiation_ARV'];
+        let StatutPatient = row['StatutPatient'];
+        let DateStatutPatient = row['DateStatutPatient'];
+
         if (sex) {
           sex = sex.trim();
         }
+
         if (given) {
           given = given.trim();
         }
@@ -80,12 +88,26 @@ fs.createReadStream(path.resolve(__dirname, '', csvFile))
         if (nationalID) {
           nationalID = nationalID.trim();
         }
-        if (ARTNumb) {
-          ARTNumb = ARTNumb.trim();
+        if (UPID) {
+          UPID = UPID.trim();
         }
         if (birthDate) {
           birthDate = birthDate.trim();
         }
+
+        if (date_enrollement) {
+          date_enrollement = date_enrollement.trim();
+        }
+        if (date_Initiation_ARV) {
+          date_Initiation_ARV = date_Initiation_ARV.trim();
+        }
+        if (StatutPatient) {
+          StatutPatient = StatutPatient.trim();
+        }
+        if (DateStatutPatient) {
+          DateStatutPatient = DateStatutPatient.trim();
+        }
+
         const resource = {
           meta: {
             tag: [{
@@ -96,33 +118,31 @@ fs.createReadStream(path.resolve(__dirname, '', csvFile))
           }
         };
         resource.resourceType = 'Patient';
-        if (sex == 'f') {
-          resource.gender = 'female';
-        } else if (sex == 'm') {
-          resource.gender = 'male';
-        }
-        if ( birthDate.match( /\d{8,8}/ ) ) {
+        resource.birthDate = birthDate;
+        resource.gender = sex;
+        /* if ( birthDate.match( /\d{8,8}/ ) ) {
           const birthMoment = moment( birthDate );
           if ( birthMoment.isValid() ) {
             resource.birthDate = birthMoment.format("YYYY-MM-DD");
           }
-        }
+        } */
         resource.identifier = [
           {
             system: 'http://clientregistry.org/openmrs',
-            value: row['rec_id'].trim(),
+            value: uuidv4(),
           },
         ];
         if (nationalID) {
           resource.identifier.push({
-            system: 'http://clientregistry.org/nationalid',
+            system: 'http://openelis-global.org/pat_nationalId',
             value: nationalID,
+            use: 'official'
           });
         }
-        if (ARTNumb) {
+        if (UPID) {
           resource.identifier.push({
-            system: 'http://clientregistry.org/artnumber',
-            value: ARTNumb,
+            system: 'https://openmrs.org/UPI',
+            value: UPID,
           });
         }
         if (phone) {
@@ -141,9 +161,37 @@ fs.createReadStream(path.resolve(__dirname, '', csvFile))
         }
         name.use = 'official';
         resource.name = [name];
+        //Extensions
+        // Add extensions to the resource itself
+        resource.extension = [];
+        if (date_enrollement) {
+          resource.extension.push({
+            url: 'patient_date_enrollement',
+            valueDate: date_enrollement,
+          });
+        }
+        if (date_Initiation_ARV) {
+          resource.extension.push({
+            url: 'patient_date_Initiation_ARV',
+            valueDate: date_Initiation_ARV,
+          });
+        }
+        if (StatutPatient) {
+          resource.extension.push({
+            url: 'patient_status',
+            valueString: StatutPatient,
+          });
+        }
+        if (DateStatutPatient) {
+          resource.extension.push({
+            url: 'patient_status_date',
+            valueDate: DateStatutPatient,
+          });
+        }
         bundle.entry.push({
           resource,
         });
+
         if (bundle.entry.length === 250) {
           totalRecords += 250;
           const tmpBundle = {
@@ -161,73 +209,44 @@ fs.createReadStream(path.resolve(__dirname, '', csvFile))
       totalRecords += bundle.entry.length;
       bundles.push(bundle);
     }
-    Promise.all(promises).then(() => {
-      console.time('Total Processing Time');
-      let count = 0;
-      async.eachSeries(
-        bundles,
-        (bundle, nxt) => {
-          async.eachSeries(
-            bundle.entry,
-            (entry, nxtEntry) => {
-              count++;
-              console.time('Processing Took');
-              console.log('Processing ' + count + ' of ' + totalRecords);
-              const agentOptions = {
-                cert: fs.readFileSync(
-                  '../server/clientCertificates/openmrs_cert.pem'
-                ),
-                key: fs.readFileSync(
-                  '../server/clientCertificates/openmrs_key.pem'
-                ),
-                ca: fs.readFileSync('../server/serverCertificates/server_cert.pem'),
-                securityOptions: 'SSL_OP_NO_SSLv3',
-              };
-              const auth = {
-                username: 'openmrs',
-                password: 'openmrs'
-              };
-              const options = {
-                url: 'https://localhost:3000/fhir/Patient',
-                // auth,
-                agentOptions,
-                json: entry.resource,
-              };
-              request.post(options, (err, res, body) => {
-                if(err) {
-                  logger.error('An error has occured');
-                  logger.error(err);
-                  return nxtEntry();
-                }
-                if(!res.headers) {
-                  logger.error('Something went wrong, this transaction was not successfully, please cross check the URL and authentication details;');
-                  return nxtEntry();
-                }
-                if(res.headers.location) {
-                  logger.info({
-                    'Patient ID': res.headers.location,
-                    'Patient CRUID': res.headers.locationcruid
-                  });
-                } else {
-                  logger.error('Something went wrong, no CRUID created');
-                }
-                console.timeEnd('Processing Took');
-                return nxtEntry();
-              });
-            }, () => {
-              return nxt();
-            }
-          );
-        }, () => {
-          console.timeEnd('Total Processing Time');
-          if (csvTrueLinks) {
-            uploadResults.uploadResults(csvTrueLinks);
-          } else {
-            console.log(
-              'CSV File that had true matches was not specified, import summary wont be displayed'
-            );
-          }
-        }
-      );
+    //Get credentials from the file or hardcode for each file
+    const auth = {
+      username: 'sigdep3',
+      password: 'sigdep3'
+    };
+
+
+    const options = {
+      url: 'https://dev.cihis.org/openhimcore/CR/fhir',
+      //agentOptions,
+      auth,
+      json: bundles[0]
+    };
+
+    request.post(options, (err, res, body) => {
+      if (err) {
+        logger.error('An error has occured');
+        logger.error(err);
+        return nxtEntry();
+      }
+      if (res.headers.location) {
+        logger.info({
+          'Patient ID': res.headers.location,
+          'Patient CRUID': res.headers.locationcruid
+        });
+      } else {
+        logger.error('Something went wrong, no CRUID created');
+      }
+
+      console.timeEnd('Processing Took');
+
+      console.timeEnd('Total Processing Time');
+      if (csvTrueLinks) {
+        uploadResults.uploadResults(csvTrueLinks);
+      } else {
+        console.log(
+          'True links were not specified then upload results wont be displayed'
+        );
+      }
     });
   });
