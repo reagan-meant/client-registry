@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: uwdigi/opencr
+  IMAGE_NAME: itechuw/opencr
 
 jobs:
   build-and-push-opencr-image:
