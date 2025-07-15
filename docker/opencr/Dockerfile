@@ -3,7 +3,7 @@ FROM node:18-slim
 RUN mkdir -p /var/log
 ARG branch=master
 RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends git wget && \
+    apt-get install -y --no-install-recommends git wget ca-certificates && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 RUN git clone --branch ${branch} https://github.com/DIGI-UW/client-registry-fork /src/
