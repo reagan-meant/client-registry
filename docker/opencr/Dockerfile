@@ -1,7 +1,7 @@
 FROM node:18-slim
 
 RUN mkdir -p /var/log
-ARG branch=master
+ARG branch=main
 RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends git wget ca-certificates && \
     apt-get clean && \
