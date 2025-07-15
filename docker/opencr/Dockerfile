@@ -2,7 +2,10 @@ FROM node:18-slim
 
 RUN mkdir -p /var/log
 ARG branch=master
-RUN apt-get -qq update && apt-get install -y -qq git && apt-get install -y --no-install-recommends wget
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends git wget && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 RUN git clone --branch ${branch} https://github.com/DIGI-UW/client-registry-fork /src/
 
 WORKDIR /src/server
